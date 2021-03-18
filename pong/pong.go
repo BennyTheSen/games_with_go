@@ -8,9 +8,8 @@ package main
 
 import (
 	"fmt"
-	"time"
-
 	"games_with_go/noise"
+	"time"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
@@ -115,6 +114,62 @@ type ball struct {
 	color  color
 }
 
+func lerp(b1, b2 byte, pct float32) byte {
+	return byte(float32(b1) + pct*(float32(b2)-float32(b1)))
+}
+
+func colorLerp(c1, c2 color, pct float32) color {
+	return color{lerp(c1.r, c2.r, pct), lerp(c1.g, c2.g, pct), lerp(c1.b, c2.b, pct)}
+}
+
+func getGradient(c1, c2 color) []color {
+	result := make([]color, 256)
+	for i := range result {
+		pct := float32(i) / float32(255)
+		result[i] = colorLerp(c1, c2, pct)
+	}
+	return result
+}
+
+func getDualGradient(c1, c2, c3, c4 color) []color {
+	result := make([]color, 256)
+	for i := range result {
+		pct := float32(i) / float32(255)
+		if pct < 0.5 {
+			result[i] = colorLerp(c1, c2, pct*float32(2))
+		} else {
+			result[i] = colorLerp(c3, c4, pct*float32(1.5)-float32(0.5))
+		}
+
+	}
+	return result
+}
+
+func clamp(min, max, v int) int {
+	if v < min {
+		v = min
+	} else if v > max {
+		v = max
+	}
+	return v
+}
+
+func rescaleAndDraw(noise []float32, min, max float32, gradient []color, w, h int) []byte {
+	result := make([]byte, w*h*4)
+	scale := 255.0 / (max - min)
+	offset := min * scale
+
+	for i := range noise {
+		noise[i] = noise[i]*scale - offset
+		c := gradient[clamp(0, 255, int(noise[i]))]
+		p := i * 4
+		result[p] = c.r
+		result[p+1] = c.g
+		result[p+2] = c.b
+	}
+	return result
+}
+
 func drawNumber(pos pos, color color, size int, num int, pixels []byte) {
 	startX := int(pos.x) - (size*3)/2
 	startY := int(pos.y) - (size*5)/2
@@ -195,7 +250,7 @@ type paddle struct {
 	color color
 }
 
-func lerp(a float32, b float32, pct float32) float32 {
+func flerp(a float32, b float32, pct float32) float32 {
 	return a + pct*(b-a)
 }
 
@@ -209,7 +264,7 @@ func (paddle *paddle) draw(pixels []byte) {
 		}
 	}
 
-	numX := lerp(paddle.x, getCenter().x, 0.2)
+	numX := flerp(paddle.x, getCenter().x, 0.2)
 	drawNumber(pos{numX, 35}, paddle.color, 10, paddle.score, pixels)
 }
 
@@ -276,13 +331,15 @@ func main() {
 	defer tex.Destroy()
 
 	pixels := make([]byte, winWidth*winHeight*4)
-	player1 := paddle{pos{50, 100}, 20, 130, 250, 0, color{0, 0, 255}}
-	player2 := paddle{pos{float32(winWidth) - 50, 100}, 20, 130, 250, 0, color{0, 0, 255}}
-	ball := ball{pos{300, 300}, 20, 300, 300, color{255, 0, 0}}
+	player1 := paddle{pos{50, 100}, 20, 130, 250, 0, color{0, 0, 0}}
+	player2 := paddle{pos{float32(winWidth) - 50, 100}, 20, 130, 250, 0, color{0, 0, 0}}
+	ball := ball{pos{300, 300}, 20, 300, 300, color{100, 0, 0}}
 
 	keyState := sdl.GetKeyboardState()
 
-	noise := noise.MakeNoise()
+	noise, min, max := noise.MakeNoise(noise.FBM, .01, 0.2, 2, 3, winWidth, winHeight)
+	gradient := getGradient(color{0, 255, 0}, color{0, 0, 255})
+	noisePixels := rescaleAndDraw(noise, min, max, gradient, winWidth, winHeight)
 
 	var frameStart time.Time
 	var elapsedTime float32
@@ -310,7 +367,7 @@ func main() {
 			}
 		}
 
-		clear(pixels)
+		copy(pixels, noisePixels)
 		player1.draw(pixels)
 		player2.draw(pixels)
 		ball.draw(pixels)
@@ -321,7 +378,7 @@ func main() {
 
 		elapsedTime = float32(time.Since(frameStart).Seconds())
 		if elapsedTime < .005 {
-			sdl.Delay(5 - uint32(elapsedTime/1000.0))
+			sdl.Delay(5 - uint32(elapsedTime*1000.0))
 			elapsedTime = float32(time.Since(frameStart).Seconds())
 		}
 	}

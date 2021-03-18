@@ -42,11 +42,11 @@ func Fbm2(x, y, frequency, lacunarity, gain float32, octaves int) float32 {
 }
 
 // MakeNoise generates 2d block of noise
-func MakeNoise(noiseType NoiseType, frequency, lacunarity, gain float32, octaves, w, h int) []float32 {
+func MakeNoise(noiseType NoiseType, frequency, lacunarity, gain float32, octaves, w, h int) (noise []float32, min, max float32) {
 	var mutex = &sync.Mutex{}
-	noise := make([]float32, w*h)
-	min := float32(9999.0)
-	max := float32(-9999.0)
+	noise = make([]float32, w*h)
+	min = float32(9999.0)
+	max = float32(-9999.0)
 	numRoutines := runtime.NumCPU()
 	var wg sync.WaitGroup
 	wg.Add(numRoutines)
@@ -82,7 +82,7 @@ func MakeNoise(noiseType NoiseType, frequency, lacunarity, gain float32, octaves
 		}(i)
 	}
 	wg.Wait()
-	return noise
+	return noise, min, max
 }
 
 /* This code ported to Go from Stefan Gustavson's C implementation, his comments follow:
