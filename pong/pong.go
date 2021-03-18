@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	"games_with_go/noise"
+
 	"github.com/veandco/go-sdl2/sdl"
 )
 
@@ -279,6 +281,8 @@ func main() {
 	ball := ball{pos{300, 300}, 20, 300, 300, color{255, 0, 0}}
 
 	keyState := sdl.GetKeyboardState()
+
+	noise := noise.MakeNoise()
 
 	var frameStart time.Time
 	var elapsedTime float32

@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"runtime"
+	"sync"
+	"time"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
@@ -90,26 +93,48 @@ func fbm2(x, y, frequency, lacunarity, gain float32, octaves int) float32 {
 	return sum
 }
 
-func makeNoise(pixels []byte, frequency, lacunarity, gain float32, octaves int) {
+func makeNoise(pixels []byte, frequency, lacunarity, gain float32, octaves, w, h int) {
+	var mutex = &sync.Mutex{}
+	startTime := time.Now()
 	noise := make([]float32, winWidth*winHeight)
 	fmt.Println("freq:", frequency, "lacunarity:", lacunarity, "gain:", gain, "octaves", octaves)
-
-	i := 0
 	min := float32(9999.0)
 	max := float32(-9999.0)
+	numRoutines := runtime.NumCPU()
+	var wg sync.WaitGroup
+	wg.Add(numRoutines)
+	batchSize := len(noise) / numRoutines
 
-	for y := 0; y < winHeight; y++ {
-		for x := 0; x < winWidth; x++ {
-			noise[i] = turbulence(float32(x), float32(y), frequency, lacunarity, gain, octaves)
-			if noise[i] < min {
-				min = noise[i]
-			} else if noise[i] > max {
-				max = noise[i]
+	for i := 0; i < numRoutines; i++ {
+		go func(i int) {
+			defer wg.Done()
+			start := i * batchSize
+			end := start + batchSize - 1
+			for j := start; j < end; j++ {
+				x := j % w
+				y := (j - x) / h
+				noise[j] = turbulence(float32(x), float32(y), frequency, lacunarity, gain, octaves)
+
+				// Is this always correct?
+				if noise[j] < min || noise[j] > max {
+					// mutex lock to make it threadsafe
+					mutex.Lock()
+					if noise[j] < min {
+						min = noise[j]
+					} else if noise[j] > max {
+						max = noise[j]
+					}
+					mutex.Unlock()
+				}
 			}
-			i++
-		}
+		}(i)
 	}
-	gradient := getDualGradient(color{200, 50, 20}, color{39, 39, 255}, color{30, 255, 20}, color{200, 200, 180})
+	wg.Wait()
+	elapsedTime := time.Since(startTime).Seconds() * 1000.0
+	fmt.Println(elapsedTime)
+
+	//gradient := getDualGradient(color{200, 50, 20}, color{39, 39, 255}, color{30, 255, 20}, color{200, 200, 180})
+	gradient := getGradient(color{255, 0, 0}, color{255, 242, 0})
 	rescaleAndDraw(noise, min, max, gradient, pixels)
 }
 
@@ -138,7 +163,7 @@ func main() {
 	}
 	defer sdl.Quit()
 
-	window, err := sdl.CreateWindow("Testing SDL2", sdl.WINDOWPOS_UNDEFINED,
+	window, err := sdl.CreateWindow("Simplex Noise Tester", sdl.WINDOWPOS_UNDEFINED,
 		sdl.WINDOWPOS_UNDEFINED, int32(winWidth), int32(winHeight), sdl.WINDOW_SHOWN)
 	if err != nil {
 		fmt.Println(err)
@@ -165,7 +190,7 @@ func main() {
 	gain := float32(0.2)
 	lac := float32(3.0)
 	octaves := 3
-	makeNoise(pixels, frequency, lac, gain, octaves)
+	makeNoise(pixels, frequency, lac, gain, octaves, winWidth, winHeight)
 	keyState := sdl.GetKeyboardState()
 
 	tex.Update(nil, pixels, winWidth*4)
@@ -187,19 +212,19 @@ func main() {
 		}
 		if keyState[sdl.SCANCODE_0] != 0 {
 			octaves = octaves + 1*mult
-			makeNoise(pixels, frequency, lac, gain, octaves)
+			makeNoise(pixels, frequency, lac, gain, octaves, winWidth, winHeight)
 		}
 		if keyState[sdl.SCANCODE_F] != 0 {
 			frequency = frequency + 0.001*float32(mult)
-			makeNoise(pixels, frequency, lac, gain, octaves)
+			makeNoise(pixels, frequency, lac, gain, octaves, winWidth, winHeight)
 		}
 		if keyState[sdl.SCANCODE_G] != 0 {
 			gain = gain + 0.1*float32(mult)
-			makeNoise(pixels, frequency, lac, gain, octaves)
+			makeNoise(pixels, frequency, lac, gain, octaves, winWidth, winHeight)
 		}
 		if keyState[sdl.SCANCODE_L] != 0 {
 			lac = lac + 0.1*float32(mult)
-			makeNoise(pixels, frequency, lac, gain, octaves)
+			makeNoise(pixels, frequency, lac, gain, octaves, winWidth, winHeight)
 		}
 
 		tex.Update(nil, pixels, winWidth*4)
