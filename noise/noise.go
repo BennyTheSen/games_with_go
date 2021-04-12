@@ -46,25 +46,24 @@ func Fbm2(x, y, frequency, lacunarity, gain float32, octaves int) float32 {
 func MakeNoise(noiseType NoiseType, frequency, lacunarity, gain float32, octaves, w, h int) (noise []float32, min, max float32) {
 	noise = make([]float32, w*h)
 	numRoutines := runtime.NumCPU()
-	min = float32(math.MaxFloat32)
-	max = float32(-math.MaxFloat32)
-
-	minMaxChan := make(chan float32, numRoutines*2)
-
 	var wg sync.WaitGroup
 	wg.Add(numRoutines)
 	batchSize := len(noise) / numRoutines
 
+	minMaxChan := make(chan float32, numRoutines*2)
+	min = float32(math.MaxFloat32)
+	max = float32(-math.MaxFloat32)
+
 	for i := 0; i < numRoutines; i++ {
 		go func(i int) {
 			defer wg.Done()
-			innerMin := float32(-math.MaxFloat32)
-			innerMax := float32(math.MaxFloat32)
+			innerMin := float32(math.MaxFloat32)
+			innerMax := float32(-math.MaxFloat32)
 			start := i * batchSize
 			end := start + batchSize - 1
 			for j := start; j < end; j++ {
 				x := j % w
-				y := (j - x) / h
+				y := (j - x) / w
 
 				if noiseType == TURBULENCE {
 					noise[j] = Turbulence(float32(x), float32(y), frequency, lacunarity, gain, octaves)
