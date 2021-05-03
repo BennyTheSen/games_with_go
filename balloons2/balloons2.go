@@ -17,7 +17,7 @@ import (
 	"github.com/veandco/go-sdl2/sdl"
 )
 
-const winWidth, winHeight, winDepth int = 800, 600, 10
+const winWidth, winHeight, winDepth int = 1280, 720, 100
 
 type audioState struct {
 	explosionBytes []byte
@@ -80,7 +80,7 @@ func (balloons balloonArray) Less(i, j int) bool {
 }
 
 func (balloon *balloon) getScale() float32 {
-	return (balloon.pos.Z/400 + 1) / 2
+	return (balloon.pos.Z/200 + 1) / 2
 }
 
 func (balloon *balloon) getCircle() (x, y, r float32) {
@@ -90,43 +90,64 @@ func (balloon *balloon) getCircle() (x, y, r float32) {
 	return x, y, r
 }
 
-func (balloon *balloon) update(elapsedTime float32, currentMouseState, prevMouseState mouseState, audioState *audioState) {
-	p := vec3.Add(balloon.pos, vec3.Mult(balloon.dir, elapsedTime))
+func updateBalloons(balloons []*balloon, elapsedTime float32, currentMouseState, prevMouseState mouseState, audioState *audioState) []*balloon {
 
 	numAnimations := 16
-	animationElapsed := float32(time.Since(balloon.explosionStart).Seconds() * 1000)
-	animationIndex := numAnimations - 1 - int(animationElapsed/balloon.explosionInterval)
-	if animationIndex < 0 {
-		balloon.exploding = false
-		balloon.exploded = true
-	}
+	balloonClicked := false
+	balloonsExploded := false
+	for i := len(balloons) - 1; i >= 0; i-- {
+		balloon := balloons[i]
 
-	if !prevMouseState.leftButton && currentMouseState.leftButton {
-		x, y, r := balloon.getCircle()
-		mouseX := currentMouseState.x
-		mouseY := currentMouseState.y
-		xDiff := float32(mouseX) - x
-		yDiff := float32(mouseY) - y
-		dist := float32(math.Sqrt(float64(xDiff*xDiff + yDiff*yDiff)))
-		if dist < r {
-			sdl.ClearQueuedAudio(audioState.deviceId)
-			sdl.QueueAudio(audioState.deviceId, audioState.explosionBytes)
-			sdl.PauseAudioDevice(audioState.deviceId, false)
-			balloon.exploding = true
-			balloon.explosionStart = time.Now()
+		if balloon.exploding {
+			animationElapsed := float32(time.Since(balloon.explosionStart).Seconds() * 1000)
+			animationIndex := numAnimations - 1 - int(animationElapsed/balloon.explosionInterval)
+			if animationIndex < 0 {
+				balloon.exploding = false
+				balloon.exploded = true
+				balloonsExploded = true
+			}
 		}
+
+		if !balloonClicked && !prevMouseState.leftButton && currentMouseState.leftButton {
+			x, y, r := balloon.getCircle()
+			mouseX := currentMouseState.x
+			mouseY := currentMouseState.y
+			xDiff := float32(mouseX) - x
+			yDiff := float32(mouseY) - y
+			dist := float32(math.Sqrt(float64(xDiff*xDiff + yDiff*yDiff)))
+			if dist < r {
+				balloonClicked = true
+				sdl.ClearQueuedAudio(audioState.deviceId)
+				sdl.QueueAudio(audioState.deviceId, audioState.explosionBytes)
+				sdl.PauseAudioDevice(audioState.deviceId, false)
+				balloon.exploding = true
+				balloon.explosionStart = time.Now()
+			}
+		}
+
+		p := vec3.Add(balloon.pos, vec3.Mult(balloon.dir, elapsedTime))
+		if p.X < 0 || p.X > float32(winWidth) {
+			balloon.dir.X = -balloon.dir.X
+		}
+		if p.Y < 0 || p.Y > float32(winWidth) {
+			balloon.dir.Y = -balloon.dir.Y
+		}
+		if p.Z < 0 || p.Z > float32(winWidth) {
+			balloon.dir.Z = -balloon.dir.Z
+		}
+		balloon.pos = vec3.Add(balloon.pos, vec3.Mult(balloon.dir, elapsedTime))
 	}
 
-	if p.X < 0 || p.X > float32(winWidth) {
-		balloon.dir.X = -balloon.dir.X
+	if balloonsExploded {
+		filteredBalloons := balloons[0:0]
+		for _, balloon := range balloons {
+			if !balloon.exploded {
+				filteredBalloons = append(filteredBalloons, balloon)
+			}
+		}
+		balloons = filteredBalloons
 	}
-	if p.Y < 0 || p.Y > float32(winWidth) {
-		balloon.dir.Y = -balloon.dir.Y
-	}
-	if p.Z < 0 || p.Z > float32(winWidth) {
-		balloon.dir.Z = -balloon.dir.Z
-	}
-	balloon.pos = vec3.Add(balloon.pos, vec3.Mult(balloon.dir, elapsedTime))
+	return balloons
 }
 
 func (balloon *balloon) draw(renderer *sdl.Renderer) {
@@ -218,7 +239,7 @@ func loadBalloons(renderer *sdl.Renderer, numBalloons int) []*balloon {
 	for i := range balloons {
 		tex := balloonTextures[i%3]
 		pos := vec3.Vector3{rand.Float32() * float32(winWidth), rand.Float32() * float32(winHeight), rand.Float32() * float32(winDepth)}
-		dir := vec3.Vector3{rand.Float32()*0.5 - .25, rand.Float32()*0.5 - .25, rand.Float32()*0.25 - 25/2}
+		dir := vec3.Vector3{rand.Float32()*0.5 - .25, rand.Float32()*0.5 - .25, rand.Float32()*0.25 - .25/2}
 		balloons[i] = newBalloon(tex, pos, dir, explosionTexture)
 	}
 	return balloons
@@ -333,9 +354,8 @@ func main() {
 		}
 
 		renderer.Copy(cloudTexture, nil, nil)
-		for _, balloon := range balloons {
-			balloon.update(elapsedTime, currentMouseState, prevMouseState, &audioState)
-		}
+		balloons = updateBalloons(balloons, elapsedTime, currentMouseState, prevMouseState, &audioState)
+
 		sort.Stable(balloonArray(balloons))
 		for _, balloon := range balloons {
 			balloon.draw(renderer)
