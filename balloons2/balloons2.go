@@ -4,18 +4,26 @@ package main
 
 import (
 	"fmt"
-	"games_with_go/noise"
-	"games_with_go/vec3"
 	"image/png"
+	"math"
 	"math/rand"
 	"os"
 	"sort"
 	"time"
 
+	"games_with_go/noise"
+	"games_with_go/vec3"
+
 	"github.com/veandco/go-sdl2/sdl"
 )
 
 const winWidth, winHeight, winDepth int = 800, 600, 10
+
+type audioState struct {
+	explosionBytes []byte
+	deviceId       sdl.AudioDeviceID
+	audioSpec      *sdl.AudioSpec
+}
 
 type mouseState struct {
 	leftButton  bool
@@ -40,6 +48,21 @@ type balloon struct {
 	pos  vec3.Vector3
 	dir  vec3.Vector3
 	w, h int
+
+	exploding         bool
+	exploded          bool
+	explosionStart    time.Time
+	explosionInterval float32
+	explosionTexture  *sdl.Texture
+}
+
+func newBalloon(tex *sdl.Texture, pos, dir vec3.Vector3, explosionTexture *sdl.Texture) *balloon {
+	_, _, w, h, err := tex.Query()
+	if err != nil {
+		panic(err)
+	}
+	return &balloon{tex, pos, dir, int(w), int(h), false, false, time.Now(), 20, explosionTexture}
+
 }
 
 type balloonArray []*balloon
@@ -60,8 +83,40 @@ func (balloon *balloon) getScale() float32 {
 	return (balloon.pos.Z/400 + 1) / 2
 }
 
-func (balloon *balloon) update(elapsedTime float32) {
+func (balloon *balloon) getCircle() (x, y, r float32) {
+	x = balloon.pos.X
+	y = balloon.pos.Y - 30*balloon.getScale()
+	r = float32(balloon.w) / 2 * balloon.getScale()
+	return x, y, r
+}
+
+func (balloon *balloon) update(elapsedTime float32, currentMouseState, prevMouseState mouseState, audioState *audioState) {
 	p := vec3.Add(balloon.pos, vec3.Mult(balloon.dir, elapsedTime))
+
+	numAnimations := 16
+	animationElapsed := float32(time.Since(balloon.explosionStart).Seconds() * 1000)
+	animationIndex := numAnimations - 1 - int(animationElapsed/balloon.explosionInterval)
+	if animationIndex < 0 {
+		balloon.exploding = false
+		balloon.exploded = true
+	}
+
+	if !prevMouseState.leftButton && currentMouseState.leftButton {
+		x, y, r := balloon.getCircle()
+		mouseX := currentMouseState.x
+		mouseY := currentMouseState.y
+		xDiff := float32(mouseX) - x
+		yDiff := float32(mouseY) - y
+		dist := float32(math.Sqrt(float64(xDiff*xDiff + yDiff*yDiff)))
+		if dist < r {
+			sdl.ClearQueuedAudio(audioState.deviceId)
+			sdl.QueueAudio(audioState.deviceId, audioState.explosionBytes)
+			sdl.PauseAudioDevice(audioState.deviceId, false)
+			balloon.exploding = true
+			balloon.explosionStart = time.Now()
+		}
+	}
+
 	if p.X < 0 || p.X > float32(winWidth) {
 		balloon.dir.X = -balloon.dir.X
 	}
@@ -82,6 +137,21 @@ func (balloon *balloon) draw(renderer *sdl.Renderer) {
 	y := int32(balloon.pos.Y - float32(newHeight)/2)
 	rect := &sdl.Rect{X: x, Y: y, W: newWidth, H: newHeight}
 	renderer.Copy(balloon.tex, nil, rect)
+
+	if balloon.exploding {
+		numAnimations := 16
+		animationElapsed := float32(time.Since(balloon.explosionStart).Seconds() * 1000)
+		animationIndex := numAnimations - 1 - int(animationElapsed/balloon.explosionInterval)
+		animationX := animationIndex % 4
+		animationY := 64 * (animationIndex - animationX) / 4
+		animationX *= 64
+		animationRect := &sdl.Rect{int32(animationX), int32(animationY), 64, 64}
+		rect.X -= rect.W / 2
+		rect.Y -= rect.H / 2
+		rect.W *= 2
+		rect.H *= 2
+		renderer.Copy(balloon.explosionTexture, animationRect, rect)
+	}
 }
 
 type rgba struct {
@@ -98,57 +168,58 @@ func pixelsToTexture(renderer *sdl.Renderer, pixels []byte, w, h int) *sdl.Textu
 	return tex
 }
 
+func imgFileToTexture(renderer *sdl.Renderer, filename string) *sdl.Texture {
+	infile, err := os.Open(filename)
+	if err != nil {
+		panic(err)
+	}
+	defer infile.Close()
+
+	img, err := png.Decode(infile)
+	if err != nil {
+		panic(err)
+	}
+
+	w := img.Bounds().Max.X
+	h := img.Bounds().Max.Y
+
+	pixels := make([]byte, w*h*4)
+	index := 0
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r, g, b, a := img.At(x, y).RGBA()
+			pixels[index] = byte(r / 256)
+			index++
+			pixels[index] = byte(g / 256)
+			index++
+			pixels[index] = byte(b / 256)
+			index++
+			pixels[index] = byte(a / 256)
+			index++
+		}
+	}
+	tex := pixelsToTexture(renderer, pixels, w, h)
+	err = tex.SetBlendMode(sdl.BLENDMODE_BLEND)
+	if err != nil {
+		panic(err)
+	}
+	return tex
+}
+
 func loadBalloons(renderer *sdl.Renderer, numBalloons int) []*balloon {
 	balloonStrs := []string{"balloon_blue.png", "balloon_green.png", "balloon_red.png"}
 	balloonTextures := make([]*sdl.Texture, len(balloonStrs))
+	explosionTexture := imgFileToTexture(renderer, "explosion.png")
 
 	for i, bstr := range balloonStrs {
-		infile, err := os.Open(bstr)
-		if err != nil {
-			panic(err)
-		}
-		defer infile.Close()
-
-		img, err := png.Decode(infile)
-		if err != nil {
-			panic(err)
-		}
-
-		w := img.Bounds().Max.X
-		h := img.Bounds().Max.Y
-
-		balloonPixels := make([]byte, w*h*4)
-		bIndex := 0
-		for y := 0; y < h; y++ {
-			for x := 0; x < w; x++ {
-				r, g, b, a := img.At(x, y).RGBA()
-				balloonPixels[bIndex] = byte(r / 256)
-				bIndex++
-				balloonPixels[bIndex] = byte(g / 256)
-				bIndex++
-				balloonPixels[bIndex] = byte(b / 256)
-				bIndex++
-				balloonPixels[bIndex] = byte(a / 256)
-				bIndex++
-			}
-		}
-		tex := pixelsToTexture(renderer, balloonPixels, w, h)
-		err = tex.SetBlendMode(sdl.BLENDMODE_BLEND)
-		if err != nil {
-			panic(err)
-		}
-		balloonTextures[i] = tex
+		balloonTextures[i] = imgFileToTexture(renderer, bstr)
 	}
 	balloons := make([]*balloon, numBalloons)
 	for i := range balloons {
 		tex := balloonTextures[i%3]
 		pos := vec3.Vector3{rand.Float32() * float32(winWidth), rand.Float32() * float32(winHeight), rand.Float32() * float32(winDepth)}
-		dir := vec3.Vector3{rand.Float32() * 0.7, rand.Float32() * 0.7, rand.Float32() * 0.7}
-		_, _, w, h, err := tex.Query()
-		if err != nil {
-			panic(err)
-		}
-		balloons[i] = &balloon{tex, pos, dir, int(w), int(h)}
+		dir := vec3.Vector3{rand.Float32()*0.5 - .25, rand.Float32()*0.5 - .25, rand.Float32()*0.25 - 25/2}
+		balloons[i] = newBalloon(tex, pos, dir, explosionTexture)
 	}
 	return balloons
 }
@@ -205,7 +276,7 @@ func main() {
 	}
 	defer sdl.Quit()
 
-	window, err := sdl.CreateWindow("Balloons", sdl.WINDOWPOS_UNDEFINED,
+	window, err := sdl.CreateWindow("Exploding Balloons", sdl.WINDOWPOS_UNDEFINED,
 		sdl.WINDOWPOS_UNDEFINED, int32(winWidth), int32(winHeight), sdl.WINDOW_SHOWN)
 	if err != nil {
 		fmt.Println(err)
@@ -219,6 +290,16 @@ func main() {
 		return
 	}
 	defer renderer.Destroy()
+
+	explosionBytes, audioSpec := sdl.LoadWAV("explode.wav")
+	audioId, err := sdl.OpenAudioDevice("", false, audioSpec, nil, 0)
+	if err != nil {
+		panic(err)
+	}
+	defer sdl.FreeWAV(explosionBytes)
+
+	audioState := audioState{explosionBytes, audioId, audioSpec}
+
 	sdl.SetHint(sdl.HINT_RENDER_SCALE_QUALITY, "1")
 
 	cloudNoise, min, max := noise.MakeNoise(noise.FBM, .009, .5, 3, 3, winWidth, winHeight)
@@ -234,22 +315,26 @@ func main() {
 	prevMouseState := currentMouseState
 	for {
 		frameStart := time.Now()
-		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
-			switch event.(type) {
-			case *sdl.QuitEvent:
-				return
-			}
-		}
 
 		currentMouseState := getMouseState()
-
-		if !currentMouseState.leftButton && prevMouseState.leftButton {
-			fmt.Println("Left Click!")
+		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+			switch e := event.(type) {
+			case *sdl.QuitEvent:
+				return
+			case *sdl.TouchFingerEvent:
+				if e.Type == sdl.FINGERDOWN {
+					touchX := int(e.X * float32(winWidth))
+					touchY := int(e.Y * float32(winHeight))
+					currentMouseState.x = touchX
+					currentMouseState.y = touchY
+					currentMouseState.leftButton = true
+				}
+			}
 		}
 
 		renderer.Copy(cloudTexture, nil, nil)
 		for _, balloon := range balloons {
-			balloon.update(elapsedTime)
+			balloon.update(elapsedTime, currentMouseState, prevMouseState, &audioState)
 		}
 		sort.Stable(balloonArray(balloons))
 		for _, balloon := range balloons {
