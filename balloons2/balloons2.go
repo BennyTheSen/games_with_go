@@ -166,7 +166,7 @@ func (balloon *balloon) draw(renderer *sdl.Renderer) {
 		animationX := animationIndex % 4
 		animationY := 64 * (animationIndex - animationX) / 4
 		animationX *= 64
-		animationRect := &sdl.Rect{int32(animationX), int32(animationY), 64, 64}
+		animationRect := &sdl.Rect{X: int32(animationX), Y: int32(animationY), W: 64, H: 64}
 		rect.X -= rect.W / 2
 		rect.Y -= rect.H / 2
 		rect.W *= 2
@@ -238,8 +238,8 @@ func loadBalloons(renderer *sdl.Renderer, numBalloons int) []*balloon {
 	balloons := make([]*balloon, numBalloons)
 	for i := range balloons {
 		tex := balloonTextures[i%3]
-		pos := vec3.Vector3{rand.Float32() * float32(winWidth), rand.Float32() * float32(winHeight), rand.Float32() * float32(winDepth)}
-		dir := vec3.Vector3{rand.Float32()*0.5 - .25, rand.Float32()*0.5 - .25, rand.Float32()*0.25 - .25/2}
+		pos := vec3.Vector3{X: rand.Float32() * float32(winWidth), Y: rand.Float32() * float32(winHeight), Z: rand.Float32() * float32(winDepth)}
+		dir := vec3.Vector3{X: rand.Float32()*0.5 - .25, Y: rand.Float32()*0.5 - .25, Z: rand.Float32()*0.25 - .25/2}
 		balloons[i] = newBalloon(tex, pos, dir, explosionTexture)
 	}
 	return balloons
