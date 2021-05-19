@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 
 	"games_with_go/evolvingPictures/apt"
@@ -51,7 +52,7 @@ func pixelsToTexture(renderer *sdl.Renderer, pixels []byte, w, h int) *sdl.Textu
 	return tex
 }
 
-func aptToTexture(node1, node2 apt.Node, w, h int, renderer *sdl.Renderer) *sdl.Texture {
+func aptToTexture(redNode, greenNode, blueNode apt.Node, w, h int, renderer *sdl.Renderer) *sdl.Texture {
 	// -1.0 and 1.0
 	scale := float32(255 / 2)
 	offset := float32(-1.0 * scale)
@@ -61,14 +62,15 @@ func aptToTexture(node1, node2 apt.Node, w, h int, renderer *sdl.Renderer) *sdl.
 		y := float32(yi)/float32(h)*2 - 1
 		for xi := 0; xi < w; xi++ {
 			x := float32(xi)/float32(w)*2 - 1
-			c := node1.Eval(x, y)
-			c2 := node2.Eval(x, y)
+			r := redNode.Eval(x, y)
+			g := greenNode.Eval(x, y)
+			b := blueNode.Eval(x, y)
 
-			pixels[pixelIndex] = byte(c*scale - offset)
+			pixels[pixelIndex] = byte(r*scale - offset)
 			pixelIndex++
-			pixels[pixelIndex] = byte(c2*scale - offset)
+			pixels[pixelIndex] = byte(g*scale - offset)
 			pixelIndex++
-			pixels[pixelIndex] = 0
+			pixels[pixelIndex] = byte(b*scale - offset)
 			pixelIndex++
 			pixelIndex++
 
@@ -78,7 +80,7 @@ func aptToTexture(node1, node2 apt.Node, w, h int, renderer *sdl.Renderer) *sdl.
 }
 
 func main() {
-
+	//sdl.LogSetAllPriority(sdl.LOG_PRIORITY_VERBOSE)
 	//to address macosx issues
 	err := sdl.Init(sdl.INIT_EVERYTHING)
 	if err != nil {
@@ -118,16 +120,54 @@ func main() {
 	// currentMouseState := getMouseState()
 	// prevMouseState := currentMouseState
 
-	x := &apt.OpX{}
-	y := &apt.OpY{}
-	sin := &apt.OpSin{}
-	plus := &apt.OpPlus{}
+	rand.Seed(time.Now().UTC().UnixNano())
 
-	sin.Child = x
-	plus.LeftChild = sin
-	plus.RightChild = y
+	aptR := apt.GetRandomNode()
+	aptG := apt.GetRandomNode()
+	aptB := apt.GetRandomNode()
 
-	tex := aptToTexture(plus, sin, 800, 600, renderer)
+	num := rand.Intn(20)
+	for i := 0; i < num; i++ {
+		aptR.AddRandom(apt.GetRandomNode())
+	}
+	num = rand.Intn(20)
+	for i := 0; i < num; i++ {
+		aptG.AddRandom(apt.GetRandomNode())
+	}
+	num = rand.Intn(20)
+	for i := 0; i < num; i++ {
+		aptB.AddRandom(apt.GetRandomNode())
+	}
+
+	for {
+		_, nilCount := aptR.NodeCounts()
+		if nilCount == 0 {
+			break
+		}
+		aptR.AddRandom(apt.GetRandomLeaf())
+	}
+
+	for {
+		_, nilCount := aptG.NodeCounts()
+		if nilCount == 0 {
+			break
+		}
+		aptG.AddRandom(apt.GetRandomLeaf())
+	}
+
+	for {
+		_, nilCount := aptB.NodeCounts()
+		if nilCount == 0 {
+			break
+		}
+		aptB.AddRandom(apt.GetRandomLeaf())
+	}
+
+	fmt.Println("R:", aptR)
+	fmt.Println("G:", aptG)
+	fmt.Println("B:", aptB)
+
+	tex := aptToTexture(aptR, aptG, aptB, 1280, 720, renderer)
 
 	for {
 		frameStart := time.Now()
@@ -149,7 +189,6 @@ func main() {
 		}
 
 		renderer.Copy(tex, nil, nil)
-
 		renderer.Present()
 		elapsedTime = float32(time.Since(frameStart).Seconds() * 1000)
 		// fmt.Println("ms per frame", elapsedTime)
